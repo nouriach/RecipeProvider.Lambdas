@@ -1,11 +1,17 @@
 using System.Net;
 using Amazon;
+using Amazon.DynamoDBv2;
 using Amazon.Lambda.CloudWatchEvents.ScheduledEvents;
 using Amazon.Lambda.Core;
 using Amazon.SimpleEmail;
+using Amazon.SimpleEmail.Model;
 using FluentEmail.Core.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using RecipeProvider.Lambdas.Application.Abstractions;
+using RecipeProvider.Lambdas.Application.Services;
 using RecipeProvider.Lambdas.Config;
+using RecipeProvider.Lambdas.Persistence.Repositories;
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
@@ -15,14 +21,22 @@ namespace RecipeProvider.Lambdas;
 public class Function
 {
     private AmazonSimpleEmailServiceClient AmazonSimpleEmailServiceClient;
+    private IRecipeService _recipeService;
+    private ILambdaConfiguration Configuration { get; }
 
     public Function()
     {
         var serviceCollection = new ServiceCollection();
+        var lambdConfig = new LambdaConfiguration();
+        Configuration = lambdConfig;
+        serviceCollection.AddSingleton<ILambdaConfiguration>(lambdConfig);
         Console.WriteLine("---> About to call ConfigureServices");
-        ConfigureServices(serviceCollection);
+        ConfigureServices(serviceCollection, lambdConfig);
+
         var serviceProvider = serviceCollection.BuildServiceProvider();
+        Configuration = serviceProvider.GetService<ILambdaConfiguration>();
         AmazonSimpleEmailServiceClient = new AmazonSimpleEmailServiceClient();
+        _recipeService = serviceProvider.GetService<IRecipeService>();
     }
     /// <summary>
     /// A simple function that takes a string and does a ToUpper
@@ -36,7 +50,9 @@ public class Function
         // Next step is to sync up DynamoDB
 
         Console.WriteLine($"--> Scheduled Task about to run.");
-
+        var recommendedRecipes = await _recipeService.GetRandomRecipesByBook("Green");
+        var bodyText = "Recipe:\n" + string.Join("\n", recommendedRecipes.Select(
+            recipe => $"- {recipe.Title}"));
         var emailContent = new EmailData()
         {
             ToAddresses = new List<Address>
@@ -45,7 +61,7 @@ public class Function
             },
             FromAddress = new Address { EmailAddress = "nouriach17@gmail.com" },
             Subject = "Test from Recipe App Lambda",
-            Body = $"Test: {DateTime.UtcNow.ToShortTimeString()}",
+            Body = bodyText
         };
 
         try
@@ -80,21 +96,20 @@ public class Function
         return "End Test";
     }
     
-    private void ConfigureServices(IServiceCollection serviceCollection)
+    private void ConfigureServices(IServiceCollection serviceCollection, ILambdaConfiguration lambdaConfig)
     {
         Console.WriteLine("---> In ConfigureServices.");
-        var lambdaConfig = new LambdaConfiguration();
-        serviceCollection.AddSingleton<ILambdaConfiguration>(lambdaConfig);
 
         Console.WriteLine("---> Registering DynamoDB.");
-        var dynamoDbConfig = lambdaConfig.Configuration.GetSection(DynamoDbSettings.SectionName);
-        
-        serviceCollection.Configure<DynamoDbSettings>(dynamoDbConfig);
-        // This isn't working
-        // serviceCollection.AddSingleton<IAmazonDynamoDB>(sp =>
-        // {
-        //     return new AmazonDynamoDBClient(RegionEndpoint.USEast1);
-        // });
+        // var dynamoDbConfig = lambdaConfig.Configuration.GetSection(DynamoDbSettings.SectionName);
+        //
+        // serviceCollection.Configure<DynamoDbSettings>(dynamoDbConfig);
+
+        var awsOptions = lambdaConfig.Configuration.GetAWSOptions();
+        Console.WriteLine($"AWS Region: {awsOptions.Region}");
+        Console.WriteLine($"AWS Profile: {awsOptions.Profile}");
+        serviceCollection.AddDefaultAWSOptions(awsOptions);
+        serviceCollection.AddAWSService<IAmazonDynamoDB>();
         
         Console.WriteLine("---> Registering SES.");
         var sesConfig = new AmazonSimpleEmailServiceConfig
@@ -103,5 +118,7 @@ public class Function
         };
 
         serviceCollection.AddSingleton<IAmazonSimpleEmailService>(new AmazonSimpleEmailServiceClient(sesConfig));
+        serviceCollection.AddScoped<IRecipeService, RecipeService>();
+        serviceCollection.AddScoped<IRecipeRepository, RecipeRepository>();
     }
 }
