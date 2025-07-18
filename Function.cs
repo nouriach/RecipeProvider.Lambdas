@@ -1,16 +1,15 @@
-using System.Net;
 using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.Lambda.CloudWatchEvents.ScheduledEvents;
 using Amazon.Lambda.Core;
 using Amazon.SimpleEmail;
-using FluentEmail.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RecipeProvider.Lambdas.Application.Abstractions;
 using RecipeProvider.Lambdas.Application.Services;
 using RecipeProvider.Lambdas.Config;
 using RecipeProvider.Lambdas.Infrastructure;
+using RecipeProvider.Lambdas.Infrastructure.Templates;
 using RecipeProvider.Lambdas.Persistence.Repositories;
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
@@ -21,9 +20,9 @@ namespace RecipeProvider.Lambdas;
 public class Function
 {
     private IRecipeService _recipeService;
-    private IEmailService _emailService;
     private IEmailClient _emailClient;
     private ILambdaConfiguration Configuration { get; }
+    private ServiceProvider ServiceProvider;
 
     public Function()
     {
@@ -34,12 +33,12 @@ public class Function
         Console.WriteLine("---> About to call ConfigureServices");
         ConfigureServices(serviceCollection, lambdConfig);
 
-        var serviceProvider = serviceCollection.BuildServiceProvider();
-        Configuration = serviceProvider.GetService<ILambdaConfiguration>();
-        _recipeService = serviceProvider.GetService<IRecipeService>();
-        _emailService = serviceProvider.GetService<IEmailService>();
-        _emailClient = serviceProvider.GetService<IEmailClient>();
+        ServiceProvider = serviceCollection.BuildServiceProvider();
+        Configuration = ServiceProvider.GetService<ILambdaConfiguration>();
+        _recipeService = ServiceProvider.GetService<IRecipeService>();
+        _emailClient = ServiceProvider.GetService<IEmailClient>();
     }
+
     /// <summary>
     /// A simple function that takes a string and does a ToUpper
     /// </summary>
@@ -48,14 +47,14 @@ public class Function
     /// <returns></returns>
     public async Task<string> FunctionHandler(ScheduledEvent input, ILambdaContext context)
     {
+        await InitializeTemplates();
         Console.WriteLine($"--> Scheduled Task about to run.");
         var recommendedRecipes = await _recipeService.GetRandomRecipesByBook("Green");
-        var emailContent = _emailService.BuildEmailFromRecipes(recommendedRecipes);
 
         try
         {
             Console.WriteLine($"--> Sending email using SES.");
-            await _emailClient.SendEmail(emailContent);
+            await _emailClient.SendEmail(recommendedRecipes);
         }
         catch (Exception e)
         {
@@ -65,7 +64,7 @@ public class Function
         return "End Test";
     }
     
-    private void ConfigureServices(IServiceCollection serviceCollection, ILambdaConfiguration lambdaConfig)
+    private async void ConfigureServices(IServiceCollection serviceCollection, ILambdaConfiguration lambdaConfig)
     {
         Console.WriteLine("---> In ConfigureServices.");
 
@@ -86,10 +85,17 @@ public class Function
             RegionEndpoint = RegionEndpoint.USEast1 // Set your desired region
         };
 
+        serviceCollection.Configure<EmailSettings>(
+            Configuration.Configuration.GetSection(EmailSettings.ConfigurationSection)); 
         serviceCollection.AddSingleton<IAmazonSimpleEmailService>(new AmazonSimpleEmailServiceClient(sesConfig));
-        serviceCollection.AddScoped<IEmailService, EmailService>();
+
         serviceCollection.AddScoped<IEmailClient, SimpleEmailClient>();
         serviceCollection.AddScoped<IRecipeService, RecipeService>();
         serviceCollection.AddScoped<IRecipeRepository, RecipeRepository>();
+    }
+    
+    private async Task InitializeTemplates()
+    {
+        await EmailTemplates.InitializeTemplates(ServiceProvider.GetRequiredService<IAmazonSimpleEmailService>());
     }
 }

@@ -1,6 +1,5 @@
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
-using Microsoft.Extensions.Options;
 using RecipeProvider.Lambdas.Application.Abstractions;
 using RecipeProvider.Lambdas.Persistence.DTOs;
 
@@ -40,7 +39,7 @@ public class RecipeRepository : IRecipeRepository
             var recipes = await _dynamoDb.QueryAsync(request);
 
             if (recipes.Items.Count == 0)
-                return new List<RecipeDto>();
+                throw new Exception("---> No recipes returned from the1 database.");
 
             Console.WriteLine("---> Items retrieved from DynamoDB");
 
