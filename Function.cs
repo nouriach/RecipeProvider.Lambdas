@@ -1,4 +1,3 @@
-using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.Lambda.CloudWatchEvents.ScheduledEvents;
 using Amazon.Lambda.Core;
@@ -6,13 +5,11 @@ using Amazon.SimpleEmail;
 using Amazon.SimpleSystemsManagement;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using RecipeProvider.Lambdas.Application.Abstractions;
 using RecipeProvider.Lambdas.Application.Services;
 using RecipeProvider.Lambdas.Config;
 using RecipeProvider.Lambdas.Extensions;
 using RecipeProvider.Lambdas.Infrastructure;
-using RecipeProvider.Lambdas.Infrastructure.Templates;
 using RecipeProvider.Lambdas.Persistence.Repositories;
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
@@ -24,22 +21,16 @@ public class Function
 {
     private IRecipeService _recipeService;
     private IEmailClient _emailClient;
-    private ILambdaConfiguration Configuration { get; }
-    private ServiceProvider ServiceProvider;
 
     public Function()
     {
-        var serviceCollection = new ServiceCollection();
-        var lambdConfig = new LambdaConfiguration();
-        Configuration = lambdConfig;
-        serviceCollection.AddSingleton<ILambdaConfiguration>(lambdConfig);
         Console.WriteLine("---> About to call ConfigureServices");
-        ConfigureServices(serviceCollection, lambdConfig);
+        var serviceCollection = new ServiceCollection();
+        ConfigureServices(serviceCollection);
+        var serviceProvider = serviceCollection.BuildServiceProvider();
 
-        ServiceProvider = serviceCollection.BuildServiceProvider();
-        Configuration = ServiceProvider.GetService<ILambdaConfiguration>();
-        _recipeService = ServiceProvider.GetService<IRecipeService>();
-        _emailClient = ServiceProvider.GetService<IEmailClient>();
+        _recipeService = serviceProvider.GetService<IRecipeService>();
+        _emailClient = serviceProvider.GetService<IEmailClient>();
     }
 
     /// <summary>
@@ -50,7 +41,6 @@ public class Function
     /// <returns></returns>
     public async Task<string> FunctionHandler(ScheduledEvent input, ILambdaContext context)
     {
-        await InitializeTemplates();
         Console.WriteLine($"--> Scheduled Task about to run.");
         var recommendedRecipes = await _recipeService.GetRandomRecipesByBook("Green");
 
@@ -67,45 +57,30 @@ public class Function
         return "End Test";
     }
     
-    private async void ConfigureServices(IServiceCollection serviceCollection, ILambdaConfiguration lambdaConfig)
+    private async void ConfigureServices(IServiceCollection serviceCollection)
     {
-        Console.WriteLine("---> In ConfigureServices.");
+        // Build Config
+        var config = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddEnvironmentVariables()
+            .AddParameterStoreConfiguration(options =>
+            {
+                options.SsmClientFactory = () => new AmazonSimpleSystemsManagementClient();
+            })
+            .Build();
 
-        Console.WriteLine("---> Registering DynamoDB.");
+        serviceCollection.AddSingleton<IConfiguration>(config);
 
-        var awsOptions = lambdaConfig.Configuration.GetAWSOptions();
-        Console.WriteLine($"AWS Region: {awsOptions.Region}");
-        Console.WriteLine($"AWS Profile: {awsOptions.Profile}");
-        serviceCollection.AddDefaultAWSOptions(awsOptions);
-        serviceCollection.AddAWSService<IAmazonDynamoDB>();
-        
-        Console.WriteLine("---> Registering SES.");
-        var sesConfig = new AmazonSimpleEmailServiceConfig
-        {
-            RegionEndpoint = RegionEndpoint.EUWest2 // Set your desired region
-        };
-
-        serviceCollection.AddSingleton<IAmazonSimpleEmailService>(new AmazonSimpleEmailServiceClient(sesConfig));
-        
-        Console.WriteLine("---> Registering ConfigurationProvide");
-        
-        serviceCollection.AddSingleton<IConfiguration>(provider =>
-        {
-            var builder = new ConfigurationBuilder()
-                .AddParameterStoreConfiguration(options =>
-                {
-                    options.SsmClientFactory = () => new AmazonSimpleSystemsManagementClient();
-                });
-            return builder.Build();
-        });
-
+        // Register Services
         serviceCollection.AddScoped<IEmailClient, SimpleEmailClient>();
         serviceCollection.AddScoped<IRecipeService, RecipeService>();
         serviceCollection.AddScoped<IRecipeRepository, RecipeRepository>();
-    }
 
-    private async Task InitializeTemplates()
-    {
-        await EmailTemplates.InitializeTemplates(ServiceProvider.GetRequiredService<IAmazonSimpleEmailService>());
+        // Register AWS
+        var awsOptions = config.GetAWSOptions();
+        serviceCollection.AddDefaultAWSOptions(awsOptions);
+        serviceCollection.AddAWSService<IAmazonDynamoDB>();
+        serviceCollection.AddAWSService<IAmazonSimpleEmailService>();        
     }
 }

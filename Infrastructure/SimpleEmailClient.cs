@@ -16,6 +16,8 @@ public class SimpleEmailClient(IAmazonSimpleEmailService simpleEmailClient, ICon
 {
     public async Task SendEmail(List<Recipe> emailContent)
     {
+        await EmailTemplates.InitializeTemplates(simpleEmailClient);
+
         try
         {
             Console.WriteLine($"--> Sending email using SES.");
