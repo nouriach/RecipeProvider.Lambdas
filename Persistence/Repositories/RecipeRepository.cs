@@ -1,19 +1,14 @@
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
+using Microsoft.Extensions.Options;
 using RecipeProvider.Lambdas.Application.Abstractions;
+using RecipeProvider.Lambdas.Config;
 using RecipeProvider.Lambdas.Persistence.DTOs;
 
 namespace RecipeProvider.Lambdas.Persistence.Repositories;
 
-public class RecipeRepository : IRecipeRepository
+public class RecipeRepository(IAmazonDynamoDB dynamoDb, IOptions<DynamoDbSettings> dynamoConfig) : IRecipeRepository
 {
-    private readonly IAmazonDynamoDB _dynamoDb;
-
-    public RecipeRepository(IAmazonDynamoDB dynamoDb)
-    {
-        _dynamoDb = dynamoDb;
-    }
-
     public async Task<List<RecipeDto>> GetRandomRecipesByBook(string book)
     {
         try
@@ -21,7 +16,7 @@ public class RecipeRepository : IRecipeRepository
             Console.WriteLine("---> About to call DynamoDB");
             var request = new QueryRequest
             {
-                TableName = "Recipes",
+                TableName = dynamoConfig.Value.RecipesTable,
                 IndexName = "Book-LastRecommendedAt-index",
                 KeyConditionExpression = "#partitionKey = :partitionKeyValue AND #sortKey < :sortKeyValue",
                 ExpressionAttributeNames = new Dictionary<string, string>
@@ -36,7 +31,7 @@ public class RecipeRepository : IRecipeRepository
                 },
                 Limit = 5
             };
-            var recipes = await _dynamoDb.QueryAsync(request);
+            var recipes = await dynamoDb.QueryAsync(request);
 
             if (recipes.Items.Count == 0)
                 throw new Exception("---> No recipes returned from the1 database.");

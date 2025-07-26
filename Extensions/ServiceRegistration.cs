@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RecipeProvider.Lambdas.Application.Abstractions;
 using RecipeProvider.Lambdas.Application.Services;
+using RecipeProvider.Lambdas.Config;
 using RecipeProvider.Lambdas.Infrastructure;
 using RecipeProvider.Lambdas.Persistence.Repositories;
 
@@ -23,6 +24,8 @@ public static class ServiceRegistration
                 options.SsmClientFactory = () => new AmazonSimpleSystemsManagementClient();
             })
             .Build();
+
+        serviceCollection.Configure<DynamoDbSettings>(config.GetSection(DynamoDbSettings.SectionName));
 
         RegisterServices(serviceCollection, config);
         RegisterAwsServices(serviceCollection, config);
