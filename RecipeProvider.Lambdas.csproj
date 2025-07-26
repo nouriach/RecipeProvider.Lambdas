@@ -17,6 +17,7 @@
         <PackageReference Include="AWSSDK.DynamoDBv2" Version="4.0.1.3" />
         <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="4.0.1" />
         <PackageReference Include="AWSSDK.SimpleEmail" Version="4.0.0.5" />
+        <PackageReference Include="AWSSDK.SimpleSystemsManagement" Version="4.0.2.5" />
         <PackageReference Include="FluentEmail.Core" Version="3.0.2" />
         <PackageReference Include="FluentEmail.Smtp" Version="3.0.2" />
         <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.2" />

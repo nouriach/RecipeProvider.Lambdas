@@ -3,11 +3,14 @@ using Amazon.DynamoDBv2;
 using Amazon.Lambda.CloudWatchEvents.ScheduledEvents;
 using Amazon.Lambda.Core;
 using Amazon.SimpleEmail;
+using Amazon.SimpleSystemsManagement;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using RecipeProvider.Lambdas.Application.Abstractions;
 using RecipeProvider.Lambdas.Application.Services;
 using RecipeProvider.Lambdas.Config;
+using RecipeProvider.Lambdas.Extensions;
 using RecipeProvider.Lambdas.Infrastructure;
 using RecipeProvider.Lambdas.Infrastructure.Templates;
 using RecipeProvider.Lambdas.Persistence.Repositories;
@@ -69,9 +72,6 @@ public class Function
         Console.WriteLine("---> In ConfigureServices.");
 
         Console.WriteLine("---> Registering DynamoDB.");
-        // var dynamoDbConfig = lambdaConfig.Configuration.GetSection(DynamoDbSettings.SectionName);
-        //
-        // serviceCollection.Configure<DynamoDbSettings>(dynamoDbConfig);
 
         var awsOptions = lambdaConfig.Configuration.GetAWSOptions();
         Console.WriteLine($"AWS Region: {awsOptions.Region}");
@@ -82,18 +82,28 @@ public class Function
         Console.WriteLine("---> Registering SES.");
         var sesConfig = new AmazonSimpleEmailServiceConfig
         {
-            RegionEndpoint = RegionEndpoint.USEast1 // Set your desired region
+            RegionEndpoint = RegionEndpoint.EUWest2 // Set your desired region
         };
 
-        serviceCollection.Configure<EmailSettings>(
-            Configuration.Configuration.GetSection(EmailSettings.ConfigurationSection)); 
         serviceCollection.AddSingleton<IAmazonSimpleEmailService>(new AmazonSimpleEmailServiceClient(sesConfig));
+        
+        Console.WriteLine("---> Registering ConfigurationProvide");
+        
+        serviceCollection.AddSingleton<IConfiguration>(provider =>
+        {
+            var builder = new ConfigurationBuilder()
+                .AddParameterStoreConfiguration(options =>
+                {
+                    options.SsmClientFactory = () => new AmazonSimpleSystemsManagementClient();
+                });
+            return builder.Build();
+        });
 
         serviceCollection.AddScoped<IEmailClient, SimpleEmailClient>();
         serviceCollection.AddScoped<IRecipeService, RecipeService>();
         serviceCollection.AddScoped<IRecipeRepository, RecipeRepository>();
     }
-    
+
     private async Task InitializeTemplates()
     {
         await EmailTemplates.InitializeTemplates(ServiceProvider.GetRequiredService<IAmazonSimpleEmailService>());
